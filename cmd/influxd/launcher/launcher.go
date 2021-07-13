@@ -17,12 +17,13 @@ import (
 	"github.com/influxdata/flux"
 	"github.com/influxdata/flux/dependencies/testing"
 	platform "github.com/influxdata/influxdb/v2"
+	"github.com/influxdata/influxdb/v2/annotations"
+	annotationTransport "github.com/influxdata/influxdb/v2/annotations/transport"
 	"github.com/influxdata/influxdb/v2/authorization"
 	"github.com/influxdata/influxdb/v2/authorizer"
 	"github.com/influxdata/influxdb/v2/backup"
 	"github.com/influxdata/influxdb/v2/bolt"
 	"github.com/influxdata/influxdb/v2/checks"
-	"github.com/influxdata/influxdb/v2/chronograf/server"
 	"github.com/influxdata/influxdb/v2/dashboards"
 	dashboardTransport "github.com/influxdata/influxdb/v2/dashboards/transport"
 	"github.com/influxdata/influxdb/v2/dbrp"
@@ -344,7 +345,7 @@ func (m *Launcher) run(ctx context.Context, opts *InfluxdOpts) (err error) {
 	sqliteMigrator := sqlite.NewMigrator(m.sqlStore, m.log.With(zap.String("service", "sqlite migrations")))
 
 	// apply migrations to the sqlite metadata store
-	if err := sqliteMigrator.Up(ctx, &sqliteMigrations.All{}); err != nil {
+	if err := sqliteMigrator.Up(ctx, sqliteMigrations.All); err != nil {
 		m.log.Error("Failed to apply sqlite migrations", zap.Error(err))
 		return err
 	}
@@ -410,12 +411,6 @@ func (m *Launcher) run(ctx context.Context, opts *InfluxdOpts) (err error) {
 	default:
 		err := fmt.Errorf("unknown secret service %q, expected \"bolt\" or \"vault\"", opts.SecretStore)
 		m.log.Error("Failed setting secret service", zap.Error(err))
-		return err
-	}
-
-	chronografSvc, err := server.NewServiceV2(ctx, m.boltClient.DB())
-	if err != nil {
-		m.log.Error("Failed creating chronograf service", zap.Error(err))
 		return err
 	}
 
@@ -816,7 +811,6 @@ func (m *Launcher) run(ctx context.Context, opts *InfluxdOpts) (err error) {
 		NotificationEndpointService:     notificationEndpointSvc,
 		CheckService:                    checkSvc,
 		ScraperTargetStoreService:       scraperTargetSvc,
-		ChronografService:               chronografSvc,
 		SecretService:                   secretSvc,
 		LookupService:                   resourceResolver,
 		DocumentService:                 m.kvService,
@@ -954,6 +948,15 @@ func (m *Launcher) run(ctx context.Context, opts *InfluxdOpts) (err error) {
 		authorizer.NewNotebookService(notebookSvc),
 	)
 
+	annotationSvc := annotations.NewService(
+		m.log.With(zap.String("service", "annotations")),
+		m.sqlStore,
+	)
+	annotationServer := annotationTransport.NewAnnotationHandler(
+		m.log.With(zap.String("handler", "annotations")),
+		authorizer.NewAnnotationService(annotationSvc),
+	)
+
 	platformHandler := http.NewPlatformHandler(
 		m.apibackend,
 		http.WithResourceHandler(stacksHTTPServer),
@@ -970,6 +973,7 @@ func (m *Launcher) run(ctx context.Context, opts *InfluxdOpts) (err error) {
 		http.WithResourceHandler(v1AuthHTTPServer),
 		http.WithResourceHandler(dashboardServer),
 		http.WithResourceHandler(notebookServer),
+		http.WithResourceHandler(annotationServer),
 	)
 
 	httpLogger := m.log.With(zap.String("service", "http"))

@@ -12,7 +12,6 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -298,7 +297,7 @@ func (s *Shard) Statistics(tags map[string]string) []models.Statistic {
 func (s *Shard) Path() string { return s.path }
 
 // Open initializes and opens the shard's store.
-func (s *Shard) Open() error {
+func (s *Shard) Open(ctx context.Context) error {
 	if err := func() error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -344,7 +343,7 @@ func (s *Shard) Open() error {
 		e.SetEnabled(false)
 
 		// Open engine.
-		if err := e.Open(); err != nil {
+		if err := e.Open(ctx); err != nil {
 			return err
 		}
 		if shouldReindex {
@@ -504,7 +503,7 @@ type FieldCreate struct {
 }
 
 // WritePoints will write the raw data points and any new metadata to the index in the shard.
-func (s *Shard) WritePoints(points []models.Point) error {
+func (s *Shard) WritePoints(ctx context.Context, points []models.Point) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -533,7 +532,7 @@ func (s *Shard) WritePoints(points []models.Point) error {
 	}
 
 	// Write to the engine.
-	if err := engine.WritePoints(points); err != nil {
+	if err := engine.WritePoints(ctx, points); err != nil {
 		atomic.AddInt64(&s.stats.WritePointsErr, int64(len(points)))
 		atomic.AddInt64(&s.stats.WriteReqErr, 1)
 		return fmt.Errorf("engine: %s", err)
@@ -721,31 +720,35 @@ func (s *Shard) createFieldsAndMeasurements(fieldsToCreate []*FieldCreate) error
 }
 
 // DeleteSeriesRange deletes all values from for seriesKeys between min and max (inclusive)
-func (s *Shard) DeleteSeriesRange(itr SeriesIterator, min, max int64) error {
+func (s *Shard) DeleteSeriesRange(ctx context.Context, itr SeriesIterator, min, max int64) error {
 	engine, err := s.Engine()
 	if err != nil {
 		return err
 	}
-	return engine.DeleteSeriesRange(itr, min, max)
+	return engine.DeleteSeriesRange(ctx, itr, min, max)
 }
 
 // DeleteSeriesRangeWithPredicate deletes all values from for seriesKeys between min and max (inclusive)
 // for which predicate() returns true. If predicate() is nil, then all values in range are deleted.
-func (s *Shard) DeleteSeriesRangeWithPredicate(itr SeriesIterator, predicate func(name []byte, tags models.Tags) (int64, int64, bool)) error {
+func (s *Shard) DeleteSeriesRangeWithPredicate(
+	ctx context.Context,
+	itr SeriesIterator,
+	predicate func(name []byte, tags models.Tags) (int64, int64, bool),
+) error {
 	engine, err := s.Engine()
 	if err != nil {
 		return err
 	}
-	return engine.DeleteSeriesRangeWithPredicate(itr, predicate)
+	return engine.DeleteSeriesRangeWithPredicate(ctx, itr, predicate)
 }
 
 // DeleteMeasurement deletes a measurement and all underlying series.
-func (s *Shard) DeleteMeasurement(name []byte) error {
+func (s *Shard) DeleteMeasurement(ctx context.Context, name []byte) error {
 	engine, err := s.Engine()
 	if err != nil {
 		return err
 	}
-	return engine.DeleteMeasurement(name)
+	return engine.DeleteMeasurement(ctx, name)
 }
 
 // SeriesN returns the unique number of series in the shard.
@@ -1085,7 +1088,7 @@ func (s *Shard) Export(w io.Writer, basePath string, start time.Time, end time.T
 
 // Restore restores data to the underlying engine for the shard.
 // The shard is reopened after restore.
-func (s *Shard) Restore(r io.Reader, basePath string) error {
+func (s *Shard) Restore(ctx context.Context, r io.Reader, basePath string) error {
 	if err := func() error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -1109,7 +1112,7 @@ func (s *Shard) Restore(r io.Reader, basePath string) error {
 	}
 
 	// Reopen engine.
-	return s.Open()
+	return s.Open(ctx)
 }
 
 // Import imports data to the underlying engine for the shard. r should
@@ -1200,7 +1203,7 @@ type ShardGroup interface {
 	FieldDimensions(measurements []string) (fields map[string]influxql.DataType, dimensions map[string]struct{}, err error)
 	MapType(measurement, field string) influxql.DataType
 	CreateIterator(ctx context.Context, measurement *influxql.Measurement, opt query.IteratorOptions) (query.Iterator, error)
-	IteratorCost(measurement string, opt query.IteratorOptions) (query.IteratorCost, error)
+	IteratorCost(ctx context.Context, measurement string, opt query.IteratorOptions) (query.IteratorCost, error)
 	ExpandSources(sources influxql.Sources) (influxql.Sources, error)
 }
 
@@ -1397,7 +1400,7 @@ func (a Shards) createSeriesIterator(ctx context.Context, opt query.IteratorOpti
 	return NewSeriesPointIterator(IndexSet{Indexes: idxs, SeriesFile: sfile}, opt)
 }
 
-func (a Shards) IteratorCost(measurement string, opt query.IteratorOptions) (query.IteratorCost, error) {
+func (a Shards) IteratorCost(ctx context.Context, measurement string, opt query.IteratorOptions) (query.IteratorCost, error) {
 	var costs query.IteratorCost
 	var costerr error
 	var mu sync.RWMutex
@@ -1413,11 +1416,12 @@ func (a Shards) IteratorCost(measurement string, opt query.IteratorOptions) (que
 	limit := limiter.NewFixed(runtime.GOMAXPROCS(0))
 	var wg sync.WaitGroup
 	for _, sh := range a {
-		limit.Take()
+		costerr = limit.Take(ctx)
 		wg.Add(1)
 
 		mu.RLock()
 		if costerr != nil {
+			limit.Release()
 			mu.RUnlock()
 			break
 		}
@@ -1641,24 +1645,27 @@ type MeasurementFieldSet struct {
 	mu     sync.RWMutex
 	fields map[string]*MeasurementFields
 	// path is the location to persist field sets
-	path string
-	// ephemeral counters for updating the file on disk
-	memoryVersion  uint64
-	writtenVersion uint64
+	path   string
+	writer *MeasurementFieldSetWriter
 }
 
 // NewMeasurementFieldSet returns a new instance of MeasurementFieldSet.
 func NewMeasurementFieldSet(path string) (*MeasurementFieldSet, error) {
+	const MaxCombinedWrites = 100
 	fs := &MeasurementFieldSet{
-		fields:         make(map[string]*MeasurementFields),
-		path:           path,
-		memoryVersion:  0,
-		writtenVersion: 0,
+		fields: make(map[string]*MeasurementFields),
+		path:   path,
 	}
-
+	fs.SetMeasurementFieldSetWriter(MaxCombinedWrites)
 	// If there is a load error, return the error and an empty set so
 	// it can be rebuild manually.
 	return fs, fs.load()
+}
+
+func (fs *MeasurementFieldSet) Close() {
+	if fs != nil && fs.writer != nil {
+		fs.writer.Close()
+	}
 }
 
 // Bytes estimates the memory footprint of this MeasurementFieldSet, in bytes.
@@ -1738,83 +1745,153 @@ func (fs *MeasurementFieldSet) IsEmpty() bool {
 	return len(fs.fields) == 0
 }
 
-func (fs *MeasurementFieldSet) Save() (err error) {
-	// current version
-	var v uint64
-	// Is the MeasurementFieldSet empty?
-	isEmpty := false
-	// marshaled MeasurementFieldSet
+type errorChannel chan<- error
 
-	b, err := func() ([]byte, error) {
-		fs.mu.Lock()
-		defer fs.mu.Unlock()
-		fs.memoryVersion += 1
-		v = fs.memoryVersion
-		// If no fields left, remove the fields index file
-		if len(fs.fields) == 0 {
-			isEmpty = true
-			if err := os.RemoveAll(fs.path); err != nil {
-				return nil, err
-			} else {
-				fs.writtenVersion = fs.memoryVersion
-				return nil, nil
-			}
-		}
-		return fs.marshalMeasurementFieldSetNoLock()
-	}()
+type writeRequest struct {
+	done errorChannel
+}
 
-	if err != nil {
-		return err
-	} else if isEmpty {
-		return nil
-	}
+type MeasurementFieldSetWriter struct {
+	wg            sync.WaitGroup
+	writeRequests chan writeRequest
+}
 
-	// Write the new index to a temp file and rename when it's sync'd
-	// if it is still the most recent memoryVersion of the MeasurementFields
-	path := fs.path + "." + strconv.FormatUint(v, 10) + ".tmp"
-
-	fd, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_EXCL|os.O_SYNC, 0666)
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(path)
-
-	if _, err := fd.Write(fieldsIndexMagicNumber); err != nil {
-		return err
-	}
-
-	if _, err := fd.Write(b); err != nil {
-		return err
-	}
-
-	if err = fd.Sync(); err != nil {
-		return err
-	}
-
-	//close file handle before renaming to support Windows
-	if err = fd.Close(); err != nil {
-		return err
-	}
-
+// SetMeasurementFieldSetWriter - initialize the queue for write requests
+// and start the background write process
+func (fs *MeasurementFieldSet) SetMeasurementFieldSetWriter(queueLength int) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
+	fs.writer = &MeasurementFieldSetWriter{writeRequests: make(chan writeRequest, queueLength)}
+	fs.writer.wg.Add(1)
+	go fs.saveWriter()
+}
 
-	// Check if a later modification and save of fields has superseded ours
-	// If so, we are successfully done! We were beaten by a later call
-	// to this function
-	if fs.writtenVersion > v {
-		return nil
+func (w *MeasurementFieldSetWriter) Close() {
+	if w != nil {
+		close(w.writeRequests)
+		w.wg.Wait()
 	}
+}
+
+func (fs *MeasurementFieldSet) Save() error {
+	return fs.writer.RequestSave()
+}
+
+func (w *MeasurementFieldSetWriter) RequestSave() error {
+	done := make(chan error)
+	wr := writeRequest{done: done}
+	w.writeRequests <- wr
+	return <-done
+}
+
+func (fs *MeasurementFieldSet) saveWriter() {
+	defer fs.writer.wg.Done()
+	// Block until someone modifies the MeasurementFieldSet and
+	// it needs to be written to disk.
+	for req, ok := <-fs.writer.writeRequests; ok; req, ok = <-fs.writer.writeRequests {
+		fs.writeToFile(req)
+	}
+}
+
+// writeToFile: Write the new index to a temp file and rename when it's sync'd
+func (fs *MeasurementFieldSet) writeToFile(first writeRequest) {
+	var err error
+	// Put the errorChannel on which we blocked into a slice to allow more invocations
+	// to share the return code from the file write
+	errorChannels := []errorChannel{first.done}
+	defer func() {
+		for _, c := range errorChannels {
+			c <- err
+			close(c)
+		}
+	}()
+	// Do some blocking IO operations before marshalling the in-memory index
+	// to allow other changes to it to be queued up and be captured in one
+	// write operation, in case we are under heavy field creation load
+	path := fs.path + ".tmp"
+
+	// Open the temp file
+	fd, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_EXCL|os.O_SYNC, 0666)
+	if err != nil {
+		return
+	}
+	// Ensure temp file is cleaned up
+	defer func() {
+		if e := os.RemoveAll(path); err == nil {
+			err = e
+		}
+	}()
+	isEmpty, err := func() (isEmpty bool, err error) {
+		// ensure temp file closed before rename (for Windows)
+		defer func() {
+			if e := fd.Close(); err == nil {
+				err = e
+			}
+		}()
+		if _, err = fd.Write(fieldsIndexMagicNumber); err != nil {
+			return true, err
+		}
+
+		// Read all the pending new field and measurement write requests
+		// that will be captured in the marshaling of the in-memory copy
+		for {
+			select {
+			case ec := <-fs.writer.writeRequests:
+				errorChannels = append(errorChannels, ec.done)
+				continue
+			default:
+			}
+			break
+		}
+		// Lock, copy, and marshal the in-memory index
+		b, err := fs.marshalMeasurementFieldSet()
+		if err != nil {
+			return true, err
+		}
+		if b == nil {
+			// No fields, file removed, all done
+			return true, nil
+		}
+		if _, err := fd.Write(b); err != nil {
+			return true, err
+		}
+		return false, fd.Sync()
+	}()
+	if err != nil || isEmpty {
+		return
+	}
+	err = fs.renameFile(path)
+}
+
+// marshalMeasurementFieldSet: remove the fields.idx file if no fields
+// otherwise, copy the in-memory version into a protobuf to write to
+// disk
+func (fs *MeasurementFieldSet) marshalMeasurementFieldSet() ([]byte, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if len(fs.fields) == 0 {
+		// If no fields left, remove the fields index file
+		if err := os.RemoveAll(fs.path); err != nil {
+			return nil, err
+		} else {
+			return nil, nil
+		}
+	}
+	return fs.marshalMeasurementFieldSetNoLock()
+}
+
+func (fs *MeasurementFieldSet) renameFile(path string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
 
 	if err := file.RenameFile(path, fs.path); err != nil {
 		return err
 	}
 
-	if err = file.SyncDir(filepath.Dir(fs.path)); err != nil {
+	if err := file.SyncDir(filepath.Dir(fs.path)); err != nil {
 		return err
 	}
-	// Update the written version to the current version
-	fs.writtenVersion = v
+
 	return nil
 }
 

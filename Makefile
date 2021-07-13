@@ -13,7 +13,7 @@
 
 # SUBDIRS are directories that have their own Makefile.
 # It is required that all SUBDIRS have the `all` and `clean` targets.
-SUBDIRS := http chronograf storage
+SUBDIRS := static storage
 
 export GOPATH=$(shell go env GOPATH)
 export GOOS=$(shell go env GOOS)
@@ -30,8 +30,11 @@ else
 	GO_BUILD_TAGS := assets,noasm
 endif
 
-GO_TEST_ARGS := -tags '$(GO_TEST_TAGS)'
-GO_BUILD_ARGS := -tags '$(GO_BUILD_TAGS)'
+# Tags used for builds and tests on all architectures
+COMMON_TAGS := sqlite_foreign_keys,sqlite_json
+
+GO_TEST_ARGS := -tags '$(COMMON_TAGS),$(GO_TEST_TAGS)'
+GO_BUILD_ARGS := -tags '$(COMMON_TAGS),$(GO_BUILD_TAGS)'
 
 ifeq ($(OS), Windows_NT)
 	VERSION := $(shell git describe --exact-match --tags 2>nil)
@@ -74,14 +77,9 @@ SOURCES_NO_VENDOR := $(shell find . -path ./vendor -prune -o -name "*.go" -not -
 
 # List of binary cmds to build
 CMDS := \
-	bin/$(GOOS)/influx \
 	bin/$(GOOS)/influxd
 
-all: ui/build $(SUBDIRS) generate $(CMDS)
-
-# Target for the built UI assets directory.
-ui/build:
-	scripts/fetch-ui-assets.sh
+all: $(SUBDIRS) generate $(CMDS)
 
 # Target to build subdirs.
 # Each subdirs must support the `all` target.
@@ -94,13 +92,8 @@ $(SUBDIRS):
 bin/$(GOOS)/influxd: $(SOURCES)
 	$(GO_BUILD) -o $@ ./cmd/$(shell basename "$@")
 
-bin/$(GOOS)/influx: $(SOURCES)
-	$(GO_BUILD_SM) -o $@ ./cmd/$(shell basename "$@")
-
 # Ease of use build for just the go binary
 influxd: bin/$(GOOS)/influxd
-
-influx: bin/$(GOOS)/influx
 
 #
 # Define action only targets
@@ -122,7 +115,7 @@ checktidy:
 checkgenerate:
 	./etc/checkgenerate.sh
 
-generate: ui/build $(SUBDIRS)
+generate: $(SUBDIRS)
 
 test-go:
 	$(GO_TEST) $(GO_TEST_PATHS)
@@ -157,7 +150,6 @@ clean:
 	@for d in $(SUBDIRS); do $(MAKE) -C $$d clean; done
 	$(RM) -r bin
 	$(RM) -r dist
-	$(RM) -r ui/build
 
 # generate feature flags
 flags:

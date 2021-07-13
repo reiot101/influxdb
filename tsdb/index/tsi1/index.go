@@ -1089,7 +1089,7 @@ func (i *Index) RetainFileSet() (*FileSet, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
-	fs := NewFileSet(i.sfile, nil)
+	fs := NewFileSet(nil)
 	for _, p := range i.partitions {
 		pfs, err := p.RetainFileSet()
 		if err != nil {
@@ -1099,4 +1099,22 @@ func (i *Index) RetainFileSet() (*FileSet, error) {
 		fs.files = append(fs.files, pfs.files...)
 	}
 	return fs, nil
+}
+
+// IsIndexDir returns true if directory contains at least one partition directory.
+func IsIndexDir(path string) (bool, error) {
+	fis, err := os.ReadDir(path)
+	if err != nil {
+		return false, err
+	}
+	for _, fi := range fis {
+		if !fi.IsDir() {
+			continue
+		} else if ok, err := IsPartitionDir(filepath.Join(path, fi.Name())); err != nil {
+			return false, err
+		} else if ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }

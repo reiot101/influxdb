@@ -1,15 +1,14 @@
 package http
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/url"
 	"strconv"
 	"time"
 
+	"github.com/NYTimes/gziphandler"
 	"github.com/influxdata/influxdb/v2/authorizer"
 	"github.com/influxdata/influxdb/v2/kit/platform/errors"
 
@@ -57,8 +56,6 @@ const (
 	backupKVStorePath  = prefixBackup + "/kv"
 	backupShardPath    = prefixBackup + "/shards/:shardID"
 	backupMetadataPath = prefixBackup + "/metadata"
-
-	httpClientTimeout = time.Hour
 )
 
 // NewBackupHandler creates a new handler at /api/v2/backup to receive backup requests.
@@ -72,9 +69,10 @@ func NewBackupHandler(b *BackupBackend) *BackupHandler {
 		BucketManifestWriter:    b.BucketManifestWriter,
 	}
 
-	h.HandlerFunc(http.MethodGet, backupKVStorePath, h.handleBackupKVStore)
-	h.HandlerFunc(http.MethodGet, backupShardPath, h.handleBackupShard)
-	h.HandlerFunc(http.MethodGet, backupMetadataPath, h.requireOperPermissions(http.HandlerFunc(h.handleBackupMetadata)))
+	h.HandlerFunc(http.MethodGet, backupKVStorePath, h.handleBackupKVStore) // Deprecated
+
+	h.Handler(http.MethodGet, backupShardPath, gziphandler.GzipHandler(http.HandlerFunc(h.handleBackupShard)))
+	h.Handler(http.MethodGet, backupMetadataPath, gziphandler.GzipHandler(h.requireOperPermissions(http.HandlerFunc(h.handleBackupMetadata))))
 
 	return h
 }
@@ -148,8 +146,6 @@ func (h *BackupHandler) handleBackupMetadata(w http.ResponseWriter, r *http.Requ
 	h.SqlBackupRestoreService.LockSqlStore()
 	defer h.SqlBackupRestoreService.UnlockSqlStore()
 
-	baseName := time.Now().UTC().Format(influxdb.BackupFilenamePattern)
-
 	dataWriter := multipart.NewWriter(w)
 	w.Header().Set("Content-Type", "multipart/mixed; boundary="+dataWriter.Boundary())
 
@@ -160,21 +156,21 @@ func (h *BackupHandler) handleBackupMetadata(w http.ResponseWriter, r *http.Requ
 	}{
 		{
 			"application/octet-stream",
-			fmt.Sprintf("attachment; name=%q; filename=%q", "kv", fmt.Sprintf("%s.bolt", baseName)),
+			fmt.Sprintf("attachment; name=%q", "kv"),
 			func(fw io.Writer) error {
 				return h.BackupService.BackupKVStore(ctx, fw)
 			},
 		},
 		{
 			"application/octet-stream",
-			fmt.Sprintf("attachment; name=%q; filename=%q", "sql", fmt.Sprintf("%s.sqlite", baseName)),
+			fmt.Sprintf("attachment; name=%q", "sql"),
 			func(fw io.Writer) error {
 				return h.SqlBackupRestoreService.BackupSqlStore(ctx, fw)
 			},
 		},
 		{
 			"application/json; charset=utf-8",
-			fmt.Sprintf("attachment; name=%q; filename=%q", "buckets", fmt.Sprintf("%s.json", baseName)),
+			fmt.Sprintf("attachment; name=%q", "buckets"),
 			func(fw io.Writer) error {
 				return h.BucketManifestWriter.WriteManifest(ctx, fw)
 			},
@@ -202,85 +198,3 @@ func (h *BackupHandler) handleBackupMetadata(w http.ResponseWriter, r *http.Requ
 		return
 	}
 }
-
-// BackupService is the client implementation of influxdb.BackupService.
-type BackupService struct {
-	Addr               string
-	Token              string
-	InsecureSkipVerify bool
-}
-
-func (s *BackupService) BackupKVStore(ctx context.Context, w io.Writer) error {
-	span, ctx := tracing.StartSpanFromContext(ctx)
-	defer span.Finish()
-
-	u, err := NewURL(s.Addr, prefixBackup+"/kv")
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
-	if err != nil {
-		return err
-	}
-	SetToken(s.Token, req)
-	req = req.WithContext(ctx)
-
-	hc := NewClient(u.Scheme, s.InsecureSkipVerify)
-	hc.Timeout = httpClientTimeout
-	resp, err := hc.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if err := CheckError(resp); err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		return err
-	}
-	return resp.Body.Close()
-}
-
-func (s *BackupService) BackupShard(ctx context.Context, w io.Writer, shardID uint64, since time.Time) error {
-	span, ctx := tracing.StartSpanFromContext(ctx)
-	defer span.Finish()
-
-	u, err := NewURL(s.Addr, fmt.Sprintf(prefixBackup+"/shards/%d", shardID))
-	if err != nil {
-		return err
-	}
-	if !since.IsZero() {
-		u.RawQuery = (url.Values{"since": {since.UTC().Format(time.RFC3339)}}).Encode()
-	}
-
-	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
-	if err != nil {
-		return err
-	}
-	SetToken(s.Token, req)
-	req = req.WithContext(ctx)
-
-	hc := NewClient(u.Scheme, s.InsecureSkipVerify)
-	hc.Timeout = httpClientTimeout
-	resp, err := hc.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if err := CheckError(resp); err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		return err
-	}
-	return resp.Body.Close()
-}
-
-// LockKVStore & UnlockKVStore are not implemented for the client.
-func (s *BackupService) LockKVStore()   {}
-func (s *BackupService) UnlockKVStore() {}
