@@ -35,6 +35,10 @@ workflows:
                 - linux-arm64
                 - mac
                 - windows
+      - package-linux:
+          requires:
+            - build-linux-amd64
+            - build-linux-arm64
       - test:
           matrix:
             parameters:
@@ -93,6 +97,21 @@ jobs:
             ./scripts/ci/build-influxd.sh "$DEST"
       - store_artifacts:
           path: dist
+      - persist_to_workspace:
+          root: .
+          paths:
+            - dist
+
+  package-linux:
+    docker:
+      - image: cimg/go:1.16
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run:
+          name: Build linux packages
+          command: ./scripts/ci/package-linux.sh
       - persist_to_workspace:
           root: .
           paths:
