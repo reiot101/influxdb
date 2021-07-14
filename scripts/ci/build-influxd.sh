@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
+# TODO: Inject real version into these.
+
 function build_linux () {
     TAGS=osusergo,netgo,static_build,assets
     if [[ $(go env GOARCH) != amd64 ]]; then

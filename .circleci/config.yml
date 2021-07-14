@@ -39,6 +39,11 @@ workflows:
           requires:
             - build-linux-amd64
             - build-linux-arm64
+      - publish-artifacts:
+          requires:
+            - package-linux
+            - build-mac
+            - build-windows
       - test:
           matrix:
             parameters:
@@ -116,6 +121,22 @@ jobs:
           root: .
           paths:
             - dist
+
+  publish-artifacts:
+    docker:
+      - image: cimg/go:1.16
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run:
+          name: Prep artifacts
+          command: |
+            mkdir artifacts
+            ./scripts/ci/prepare-artifacts.sh $(pwd)/artifacts
+      # TODO: Inject S3 upload here?
+      - store_artifacts:
+          path: artifacts
 
   test:
     parameters:
