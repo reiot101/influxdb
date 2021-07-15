@@ -52,6 +52,10 @@ workflows:
                 - linux-arm64
                 - mac
                 - windows
+      - perf-test:
+          requires:
+            - package-linux
+            # - test
 
 commands:
   setup:
@@ -169,3 +173,18 @@ jobs:
           destination: raw-test-output
       - store_test_results:
           path: ./test-results
+
+  perf-test:
+    machine:
+      image: ubuntu-2004:202010-01
+    steps:
+      - attach_workspace:
+          at: /tmp/workspace
+      - checkout
+      - add_ssh_keys:
+          fingerprints:
+            - "91:0a:5b:a7:f9:46:77:f3:5d:4a:cf:d2:44:c8:2c:5a"
+      - run:
+          name: Run test in AWS instance
+          no_output_timeout: 20m
+          command: AWS_ACCESS_KEY_ID=${TEST_AWS_ACCESS_KEY_ID} AWS_SECRET_ACCESS_KEY=${TEST_AWS_SECRET_ACCESS_KEY} scripts/ci/perf_test.sh
