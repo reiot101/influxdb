@@ -73,6 +73,18 @@ commands:
           keys:
             - influxdb2-gomod-sum-{{ checksum "go.sum" }}
 
+  set-go-env:
+    steps:
+      - run:
+          name: Set GOPATH and GOCACHE
+          command: |
+            GOPATH=$(pwd)/.ci/go
+            echo "export GOPATH=${GOPATH}" >> $BASH_ENV
+            mkdir -p ${GOPATH}/bin
+            echo 'export PATH=${GOPATH}/bin:${PATH}' >> $BASH_ENV
+            mkdir -p $(pwd)/.ci/cache
+            echo "export GOCACHE=$(pwd)/.ci/cache" >> $BASH_ENV
+
   setup:
     steps:
       - run:
@@ -83,15 +95,7 @@ commands:
           command: |
             ./scripts/ci/install-go.sh .ci/tools
             echo 'export PATH='$(pwd)'/.ci/tools/go/bin:${PATH}' >> $BASH_ENV
-      - run:
-          name: Set GOPATH and GOCACHE
-          command: |
-            GOPATH=$(pwd)/.ci/go
-            echo "export GOPATH=${GOPATH}" >> $BASH_ENV
-            mkdir -p ${GOPATH}/bin
-            echo 'export PATH=${GOPATH}/bin:${PATH}' >> $BASH_ENV
-            mkdir -p $(pwd)/.ci/cache
-            echo "export GOCACHE=$(pwd)/.ci/cache" >> $BASH_ENV
+      - set-go-env
       - run:
           name: Install Rust toolchain
           command: |
@@ -110,11 +114,9 @@ jobs:
       TMPDIR: /mnt/ramdisk
     steps:
       - checkout
+      - set-go-env
       - restore-gocache
-      # Check for tidiness before we download to ensure the checksum of `go.sum`
-      # will match in other jobs.
       - run: make checktidy
-      - run: du -sh .ci/go/pkg/mod
       - save_cache:
           name: Save GOPATH/pkg/mod
           key: influxdb2-gomod-sum-{{ checksum "go.sum" }}
