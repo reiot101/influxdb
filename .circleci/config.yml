@@ -27,10 +27,13 @@ workflows:
   version: 2
   build-and-test:
     jobs:
-      - lint
+      - cache-deps
+      - lint:
+          requires:
+            - cache-deps
       - build:
           requires:
-            - lint
+            - cache-deps
           matrix:
             parameters:
               executor:
@@ -49,7 +52,7 @@ workflows:
             - build-windows
       - test:
           requires:
-            - lint
+            - cache-deps
           matrix:
             parameters:
               executor:
@@ -63,6 +66,13 @@ workflows:
             - test
 
 commands:
+  restore-gocache:
+    steps:
+      - restore_cache:
+          name: Restore GOPATH/pkg/mod
+          keys:
+            - influxdb-gomod-sum-{{ checksum "go.sum" }}
+
   setup:
     steps:
       - run:
@@ -71,17 +81,17 @@ commands:
       - run:
           name: Install Go
           command: |
-            ./scripts/ci/install-go.sh ${HOME}/.tools
-            echo 'export PATH=${HOME}/.tools/go/bin:${PATH}' >> $BASH_ENV
+            ./scripts/ci/install-go.sh .ci/tools
+            echo 'export PATH='$(pwd)'/.ci/tools/go/bin:${PATH}' >> $BASH_ENV
       - run:
           name: Set GOPATH and GOCACHE
           command: |
-            GOPATH=${HOME}/go
+            GOPATH=$(pwd)/.ci/go
             echo "export GOPATH=${GOPATH}" >> $BASH_ENV
             mkdir -p ${GOPATH}/bin
             echo 'export PATH=${GOPATH}/bin:${PATH}' >> $BASH_ENV
-            mkdir -p ${HOME}/.cache
-            echo 'export GOCACHE=${HOME}/.cache' >> $BASH_ENV
+            mkdir -p $(pwd)/.ci/cache
+            echo "export GOCACHE=$(pwd)/.ci/cache" >> $BASH_ENV
       - run:
           name: Install Rust toolchain
           command: |
@@ -90,8 +100,25 @@ commands:
       - run:
           name: Install pkg-config wrapper
           command: go build -o "${GOPATH}/bin/" github.com/influxdata/pkg-config
+      - restore-gocache
 
 jobs:
+  cache-deps:
+    docker:
+      - image: cimg/go:1.16
+    environment:
+      TMPDIR: /mnt/ramdisk
+    steps:
+      - checkout
+      - restore-gocache
+      - run: make checktidy
+      - save_cache:
+          name: Save GOPATH/pkg/mod
+          key: influxdb-gomod-sum-{{ checksum "go.sum" }}
+          paths:
+            - .ci/go/pkg/mod
+
+
   lint:
     executor: linux-amd64
     steps:
