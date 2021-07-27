@@ -96,10 +96,6 @@ jobs:
     steps:
       - checkout
       - setup
-      # Needed for CGO to work with `go vet`
-      - run:
-          name: Install GCC
-          command: sudo apt-get install build-essential
       - run: make checktidy
       - run:
           name: Check flag generation
@@ -109,7 +105,7 @@ jobs:
       - run: make checkfmt
       - run: GO111MODULE=on go mod vendor # staticcheck looks in vendor for dependencies.
       - run: GO111MODULE=on go install honnef.co/go/tools/cmd/staticcheck # Install staticcheck from the version we specify in go.mod.
-      - run: GO111MODULE=on ./env staticcheck ./...
+      - run: GO111MODULE=on staticcheck ./...
 
   build:
     parameters:
