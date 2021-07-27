@@ -93,24 +93,20 @@ commands:
 
 jobs:
   lint:
-    docker:
-      - image: cimg/go:1.16
+    executor: linux-amd64
     steps:
       - checkout
+      - setup
       - run:
           name: Check flag generation
           command: ./scripts/ci/lint/flags.bash
-      - run:
-          name: Install protoc
-          command: |
-            sudo apt-get update
-            sudo apt-get install protobuf-compiler
       - run: make checkgenerate
       - run: make vet
       - run: make checkfmt
       - run: GO111MODULE=on go mod vendor # staticcheck looks in vendor for dependencies.
       - run: GO111MODULE=on go install honnef.co/go/tools/cmd/staticcheck # Install staticcheck from the version we specify in go.mod.
       - run: GO111MODULE=on ./env staticcheck ./...
+
   build:
     parameters:
       executor:
