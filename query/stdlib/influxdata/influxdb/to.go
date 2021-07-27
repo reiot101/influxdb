@@ -499,7 +499,7 @@ type Stats struct {
 	NTags    int
 }
 
-func (s Stats) Update(o Stats) {
+func (s *Stats) Update(o Stats) {
 	s.NRows += o.NRows
 	if s.Latest.IsZero() || o.Latest.Unix() > s.Latest.Unix() {
 		s.Latest = o.Latest
@@ -654,11 +654,12 @@ func writeTable(ctx context.Context, t *ToTransformation, tbl flux.Table) (err e
 				NTags:    len(kv) / 2,
 			}
 			_, ok := measurementStats[measurementName]
-			if !ok {
-				measurementStats[measurementName] = mstats
-			} else {
-				measurementStats[measurementName].Update(mstats)
+			if ok {
+				existing := measurementStats[measurementName]
+				existing.Update(mstats)
+				mstats = existing
 			}
+			measurementStats[measurementName] = mstats
 
 			tags, _ = models.NewTagsKeyValues(tags, kv...)
 			pt, err := models.NewPoint(measurementName, tags, fields, pointTime)
