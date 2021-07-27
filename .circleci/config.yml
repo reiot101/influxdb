@@ -27,13 +27,8 @@ workflows:
   version: 2
   build-and-test:
     jobs:
-      - cache-deps
-      - lint:
-          requires:
-            - cache-deps
+      - lint
       - build:
-          requires:
-            - cache-deps
           matrix:
             parameters:
               executor:
@@ -51,8 +46,6 @@ workflows:
             - build-mac
             - build-windows
       - test:
-          requires:
-            - cache-deps
           matrix:
             parameters:
               executor:
@@ -66,25 +59,6 @@ workflows:
             - test
 
 commands:
-  restore-gocache:
-    steps:
-      - restore_cache:
-          name: Restore GOPATH/pkg/mod
-          keys:
-            - influxdb2-gomod-sum-{{ checksum "go.sum" }}
-
-  set-go-env:
-    steps:
-      - run:
-          name: Set GOPATH and GOCACHE
-          command: |
-            GOPATH=$(pwd)/.ci/go
-            echo "export GOPATH=${GOPATH}" >> $BASH_ENV
-            mkdir -p ${GOPATH}/bin
-            echo 'export PATH=${GOPATH}/bin:${PATH}' >> $BASH_ENV
-            mkdir -p $(pwd)/.ci/cache
-            echo "export GOCACHE=$(pwd)/.ci/cache" >> $BASH_ENV
-
   setup:
     steps:
       - run:
@@ -93,10 +67,17 @@ commands:
       - run:
           name: Install Go
           command: |
-            ./scripts/ci/install-go.sh .ci/tools
-            echo 'export PATH='$(pwd)'/.ci/tools/go/bin:${PATH}' >> $BASH_ENV
-      - set-go-env
-      - restore-gocache
+            ./scripts/ci/install-go.sh ${HOME}/.tools
+            echo 'export PATH=${HOME}/.tools/go/bin:${PATH}' >> $BASH_ENV
+      - run:
+          name: Set GOPATH and GOCACHE
+          command: |
+            GOPATH=${HOME}/go
+            echo "export GOPATH=${GOPATH}" >> $BASH_ENV
+            mkdir -p ${GOPATH}/bin
+            echo 'export PATH=${GOPATH}/bin:${PATH}' >> $BASH_ENV
+            mkdir -p ${HOME}/.cache
+            echo 'export GOCACHE=${HOME}/.cache' >> $BASH_ENV
       - run:
           name: Install Rust toolchain
           command: |
@@ -107,23 +88,6 @@ commands:
           command: go build -o "${GOPATH}/bin/" github.com/influxdata/pkg-config
 
 jobs:
-  cache-deps:
-    docker:
-      - image: cimg/go:1.16
-    environment:
-      TMPDIR: /mnt/ramdisk
-    steps:
-      - checkout
-      - set-go-env
-      - restore-gocache
-      - run: make checktidy
-      - save_cache:
-          name: Save GOPATH/pkg/mod
-          key: influxdb2-gomod-sum-{{ checksum "go.sum" }}
-          paths:
-            - .ci/go/pkg/mod
-
-
   lint:
     executor: linux-amd64
     steps:
@@ -133,6 +97,7 @@ jobs:
       - run:
           name: Install GCC
           command: sudo apt-get install build-essential
+      - run: make checktidy
       - run:
           name: Check flag generation
           command: ./scripts/ci/lint/flags.bash

@@ -18,7 +18,6 @@ influxd.bolt
 # Files generated in CI
 rustup-init.sh
 private.key
-/.ci/
 
 # TLS keys generated for testing
 test.crt
