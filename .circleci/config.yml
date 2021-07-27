@@ -132,7 +132,7 @@ jobs:
       # Needed for CGO to work with `go vet`
       - run:
           name: Install GCC
-          command: apt-get install build-essential
+          command: sudo apt-get install build-essential
       - run:
           name: Check flag generation
           command: ./scripts/ci/lint/flags.bash
