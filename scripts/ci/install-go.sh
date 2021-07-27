@@ -13,7 +13,7 @@ function go_hash () {
             echo 9e38047463da6daecab9017cd0599f33f84991e68263752cfab49253bbc98c30
             ;;
         mac_amd64)
-            echo 0b49b6cbe50b30aa0a5bb9f8ccdbb43f9cd3d9a3c36a769b8e46777d694539b5
+            echo e4e83e7c6891baa00062ed37273ce95835f0be77ad8203a29ec56dbf3d87508a
             ;;
         windows_amd64)
             echo c1132ba4e6263a1712355fb0745bf4f23e1602e1661c20f071e08bdcc5fe8db5
