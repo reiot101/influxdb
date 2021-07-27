@@ -4,7 +4,7 @@ set -eo pipefail
 declare -r GO_VERSION=1.16.6
 
 # Hashes are from the table at https://golang.org/dl/
-funcion go_hash () {
+function go_hash () {
     case $1 in
         linux_amd64)
             echo be333ef18b3016e9d7cb7b1ff1fdb0cac800ca0be4cf2290fe613b3d069dfe0d
