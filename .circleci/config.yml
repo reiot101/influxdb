@@ -27,7 +27,10 @@ workflows:
   version: 2
   build-and-test:
     jobs:
+      - lint
       - build:
+          requires:
+            - lint
           matrix:
             parameters:
               executor:
@@ -45,6 +48,8 @@ workflows:
             - build-mac
             - build-windows
       - test:
+          requires:
+            - lint
           matrix:
             parameters:
               executor:
@@ -55,7 +60,7 @@ workflows:
       - perf-test:
           requires:
             - package-linux
-            # - test
+            - test
 
 commands:
   setup:
