@@ -111,7 +111,11 @@ jobs:
     steps:
       - checkout
       - restore-gocache
+      # Check for tidiness before we download to ensure the checksum of `go.sum`
+      # will match in other jobs.
       - run: make checktidy
+      - run: go mod download
+      - run: go mod tidy
       - save_cache:
           name: Save GOPATH/pkg/mod
           key: influxdb-gomod-sum-{{ checksum "go.sum" }}
@@ -124,6 +128,10 @@ jobs:
     steps:
       - checkout
       - setup
+      # Needed for CGO to work with `go vet`
+      - run:
+          name: Install GCC
+          command: apt-get install build-essential
       - run:
           name: Check flag generation
           command: ./scripts/ci/lint/flags.bash
@@ -143,8 +151,8 @@ jobs:
       - checkout
       - setup
       - run:
-          name: Generate assets
-          command: make generate
+          name: Generate UI assets
+          command: make generate-web-assets
       - run:
           name: Build release binary
           command: |
