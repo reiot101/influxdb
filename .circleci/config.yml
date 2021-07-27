@@ -87,6 +87,20 @@ commands:
           command: go build -o "${GOPATH}/bin/" github.com/influxdata/pkg-config
 
 jobs:
+  lint:
+    docker:
+      - image: cimg/go:1.16
+    steps:
+      - checkout
+      - run:
+          name: Check flag generation
+          command: ./scripts/ci/lint/flags.bash
+      - run: make checkgenerate
+      - run: make vet
+      - run: make checkfmt
+      - run: GO111MODULE=on go mod vendor # staticcheck looks in vendor for dependencies.
+      - run: GO111MODULE=on go install honnef.co/go/tools/cmd/staticcheck # Install staticcheck from the version we specify in go.mod.
+      - run: GO111MODULE=on ./env staticcheck ./...
   build:
     parameters:
       executor:

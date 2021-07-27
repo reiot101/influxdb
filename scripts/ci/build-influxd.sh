@@ -4,7 +4,7 @@ set -eo pipefail
 # TODO: Inject real version into these.
 
 function build_linux () {
-    TAGS=osusergo,netgo,static_build,assets
+    TAGS=osusergo,netgo,static_build,assets,sqlite_foreign_keys,sqlite_json
     if [[ $(go env GOARCH) != amd64 ]]; then
         TAGS="$TAGS,noasm"
     fi
@@ -24,7 +24,7 @@ function build_mac () {
     local -r commit=$(git rev-parse --short HEAD)
     local -r build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
     PKG_CONFIG=$(which pkg-config) go build \
-        -tags assets \
+        -tags assets,sqlite_foreign_keys,sqlite_json \
         -buildmode pie \
         -ldflags "-s -w -X main.version=dev -X main.commit=${commit} -X main.date=${build_date}" \
         -o "${1}/" \
@@ -35,7 +35,7 @@ function build_windows () {
     local -r commit=$(git rev-parse --short HEAD)
     local -r build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
     PKG_CONFIG=$(which pkg-config) CC=x86_64-w64-mingw32-gcc go build \
-        -tags assets \
+        -tags assets,sqlite_foreign_keys,sqlite_json \
         -buildmode exe \
         -ldflags "-s -w -X main.version=dev -X main.commit=${commit} -X main.date=${build_date}" \
         -o "${1}/" \

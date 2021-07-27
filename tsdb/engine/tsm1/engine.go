@@ -884,17 +884,33 @@ func (e *Engine) LoadMetadataIndex(shardID uint64, index tsdb.Index) error {
 
 // IsIdle returns true if the cache is empty, there are no running compactions and the
 // shard is fully compacted.
-func (e *Engine) IsIdle() bool {
-	cacheEmpty := e.Cache.Size() == 0
+func (e *Engine) IsIdle() (state bool, reason string) {
+	c := []struct {
+		ActiveCompactions *int64
+		LogMessage        string
+	}{
+		{&e.stats.CacheCompactionsActive, "not idle because of active Cache compactions"},
+		{&e.stats.TSMCompactionsActive[0], "not idle because of active Level Zero compactions"},
+		{&e.stats.TSMCompactionsActive[1], "not idle because of active Level One compactions"},
+		{&e.stats.TSMCompactionsActive[2], "not idle because of active Level Two compactions"},
+		{&e.stats.TSMFullCompactionsActive, "not idle because of active Full compactions"},
+		{&e.stats.TSMOptimizeCompactionsActive, "not idle because of active TSM Optimization compactions"},
+	}
 
-	runningCompactions := atomic.LoadInt64(&e.stats.CacheCompactionsActive)
-	runningCompactions += atomic.LoadInt64(&e.stats.TSMCompactionsActive[0])
-	runningCompactions += atomic.LoadInt64(&e.stats.TSMCompactionsActive[1])
-	runningCompactions += atomic.LoadInt64(&e.stats.TSMCompactionsActive[2])
-	runningCompactions += atomic.LoadInt64(&e.stats.TSMFullCompactionsActive)
-	runningCompactions += atomic.LoadInt64(&e.stats.TSMOptimizeCompactionsActive)
+	for _, compactionState := range c {
+		count := atomic.LoadInt64(compactionState.ActiveCompactions)
+		if count > 0 {
+			return false, compactionState.LogMessage
+		}
+	}
 
-	return cacheEmpty && runningCompactions == 0 && e.CompactionPlan.FullyCompacted()
+	if cacheSize := e.Cache.Size(); cacheSize > 0 {
+		return false, "not idle because cache size is nonzero"
+	} else if c, r := e.CompactionPlan.FullyCompacted(); !c {
+		return false, r
+	} else {
+		return true, ""
+	}
 }
 
 // Free releases any resources held by the engine to free up memory or CPU.
@@ -1900,7 +1916,7 @@ func (e *Engine) writeSnapshotAndCommit(log *zap.Logger, closedFiles []string, s
 	}()
 
 	// write the new snapshot files
-	newFiles, err := e.Compactor.WriteSnapshot(snapshot)
+	newFiles, err := e.Compactor.WriteSnapshot(snapshot, e.logger)
 	if err != nil {
 		log.Info("Error writing snapshot from compactor", zap.Error(err))
 		return err
@@ -2145,11 +2161,10 @@ func (s *compactionStrategy) compactGroup() {
 		err   error
 		files []string
 	)
-
 	if s.fast {
-		files, err = s.compactor.CompactFast(group)
+		files, err = s.compactor.CompactFast(group, log)
 	} else {
-		files, err = s.compactor.CompactFull(group)
+		files, err = s.compactor.CompactFull(group, log)
 	}
 
 	if err != nil {
