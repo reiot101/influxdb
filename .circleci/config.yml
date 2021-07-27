@@ -71,7 +71,7 @@ commands:
       - restore_cache:
           name: Restore GOPATH/pkg/mod
           keys:
-            - influxdb-gomod-sum-{{ checksum "go.sum" }}
+            - influxdb2-gomod-sum-{{ checksum "go.sum" }}
 
   setup:
     steps:
@@ -114,11 +114,10 @@ jobs:
       # Check for tidiness before we download to ensure the checksum of `go.sum`
       # will match in other jobs.
       - run: make checktidy
-      - run: go mod download
-      - run: go mod tidy
+      - run: du -sh .ci/go/pkg/mod
       - save_cache:
           name: Save GOPATH/pkg/mod
-          key: influxdb-gomod-sum-{{ checksum "go.sum" }}
+          key: influxdb2-gomod-sum-{{ checksum "go.sum" }}
           paths:
             - .ci/go/pkg/mod
 
