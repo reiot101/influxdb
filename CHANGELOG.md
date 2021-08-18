@@ -23,6 +23,7 @@ v1.9.4 [unreleased]
 -	[#22289](https://github.com/influxdata/influxdb/pull/22289): fix: require database authorization to see continuous queries
 -	[#22294](https://github.com/influxdata/influxdb/pull/22294): fix: return correct count of ErrNotExecuted
 -	[#22341](https://github.com/influxdata/influxdb/pull/22341): fix: TSI logfile race
+-	[#22250](https://github.com/influxdata/influxdb/pull/22250): fix: influxdb packages should depend on curl
 
 v1.9.3 [unreleased]
 
