@@ -36,7 +36,7 @@ func NewDumpTSICommand() *cobra.Command {
 	var measurementFilter, tagKeyFilter, tagValueFilter string
 	cmd := &cobra.Command{
 		Use:   "dump-tsi",
-		Short: "Dumps low-level details about tsi1 files.",
+		Short: "Dumps low-level details about tsi1 files. Requires at least one arg to be specified, being index file paths",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Parse filters.
@@ -83,8 +83,8 @@ func NewDumpTSICommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&arguments.seriesFilePath, "series-file", "",
-		"Path to series file")
+	cmd.Flags().StringVar(&arguments.seriesFilePath, "series-path", "",
+		"Required. Path to series file")
 	cmd.Flags().BoolVar(&arguments.showSeries, "series", false,
 		"Show raw series data")
 	cmd.Flags().BoolVar(&arguments.showMeasurements, "measurements", false,
@@ -102,7 +102,7 @@ func NewDumpTSICommand() *cobra.Command {
 	cmd.Flags().StringVar(&tagValueFilter, "tag-value-filter", "",
 		"Regex tag value filter")
 
-	cmd.MarkFlagRequired("series-file")
+	cmd.MarkFlagRequired("series-path")
 
 	return cmd
 }
