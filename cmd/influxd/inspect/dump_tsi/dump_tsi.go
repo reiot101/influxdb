@@ -36,7 +36,8 @@ func NewDumpTSICommand() *cobra.Command {
 	var measurementFilter, tagKeyFilter, tagValueFilter string
 	cmd := &cobra.Command{
 		Use:   "dump-tsi",
-		Short: "Dumps low-level details about tsi1 files. Requires at least one arg to be specified, being index file paths",
+		Short: "Dumps low-level details about tsi1 files",
+		Long: "Dumps low-level details about tsi1 files. Requires at least one arg to be specified, being index file paths",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Parse filters.
